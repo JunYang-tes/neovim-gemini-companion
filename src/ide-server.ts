@@ -48,7 +48,7 @@ export class IDEServer {
     this.openFilesManager = new OpenFilesManager();
   }
 
-  async start() {
+  async start(port: number) {
     await this.diffManager.initialize();
     await this.openFilesManager.initialize();
 
@@ -184,7 +184,7 @@ export class IDEServer {
 
     app.get('/mcp', handleSessionRequest);
 
-    this.server = app.listen(0, () => {
+    this.server = app.listen(port, () => {
       const address = (this.server as HTTPServer).address();
       if (address && typeof address !== 'string') {
         const port = address.port;
@@ -231,6 +231,7 @@ const createMcpServer = (diffManager: DiffManager) => {
         '(IDE Tool) Open a diff view to create or modify a file. Returns a notification once the diff has been accepted or rejcted.',
       inputSchema: z.object({
         filePath: z.string(),
+        // TODO(chrstn): determine if this should be required or not.
         newContent: z.string().optional(),
       }).shape,
     },
@@ -241,6 +242,7 @@ const createMcpServer = (diffManager: DiffManager) => {
       filePath: string;
       newContent?: string;
     }) => {
+      console.log("------------open diff")
       await diffManager.showDiff(filePath, newContent ?? '');
       return {
         content: [
