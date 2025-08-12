@@ -242,7 +242,6 @@ const createMcpServer = (diffManager: DiffManager) => {
       filePath: string;
       newContent?: string;
     }) => {
-      console.log("------------open diff")
       await diffManager.showDiff(filePath, newContent ?? '');
       return {
         content: [

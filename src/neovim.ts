@@ -214,31 +214,72 @@ export async function createBuffer(content: string, ft = "") {
   return buf;
 }
 
+export type DiffResult = 'accepted' | 'rejected'
 
+let diffCounter = 0
 export async function diff(oldPath: string, newPath: string) {
   const nvim = await getClient();
   if (!nvim) {
-    return Promise.resolve(false);
+    return "rejected";
   }
   await nvim.command(`tabnew ${newPath}`);
   await nvim.command(`vert diffsplit ${oldPath}`);
-  return new Promise<boolean>((res) => {
-    registerAutocmd(
-      "BufWinLeave",
-      { pattern: oldPath },
-      (args: {
-        buf: number;
-      }) => {
-        res(true)
-        return true;
-      },
-    );
-    registerAutocmd("BufWinLeave", { pattern: newPath }, (args: { buf: number }) => {
-      res(true)
-      return true;
-    });
-  })
 
+  const { promise, resolve } = withResolvers<DiffResult>();
+
+  let resolved = false;
+
+  const doResolve = (result: DiffResult) => {
+    if (resolved) {
+      return;
+    }
+    resolved = true;
+    resolve(result);
+  };
+
+  const acceptId = `diff_accept_${++diffCounter}`;
+  autocmdCallbacks.set(acceptId, () => {
+    doResolve("accepted");
+  });
+
+  const rejectId = `diff_reject_${++diffCounter}`;
+  autocmdCallbacks.set(rejectId, () => {
+    doResolve("rejected");
+  });
+
+  const leaveCallback = () => {
+    doResolve("accepted");
+    return true; // unregister self
+  };
+
+  registerAutocmd("BufWinLeave", { pattern: oldPath }, leaveCallback)
+  registerAutocmd("BufWinLeave", { pattern: newPath }, leaveCallback)
+
+  const channelId = await nvim.channelId;
+  const method = "nvim_AUTOCMD_CALLBACK";
+
+  const setKeymaps = async (bufnr: number) => {
+    const luaCode = `
+        local bufnr, channelId, method, acceptId, rejectId = ...
+        vim.keymap.set('n', 'a', function() 
+            vim.rpcnotify(channelId, method, acceptId)
+        end, { buffer = bufnr, nowait = true })
+        vim.keymap.set('n', 'r', function() 
+            vim.rpcnotify(channelId, method, rejectId)
+        end, { buffer = bufnr, nowait = true })
+      `;
+    await nvim.lua(luaCode, [bufnr, channelId, method, acceptId, rejectId]);
+  };
+
+  const oldPathBufnr = await nvim.call("bufnr", "%" as any);
+  await nvim.command("wincmd w");
+  const newPathBufnr = await nvim.call("bufnr", "%" as any);
+  await nvim.command("wincmd p"); // return to original window
+
+  await setKeymaps(oldPathBufnr as number);
+  await setKeymaps(newPathBufnr as number);
+
+  return promise;
 }
 
 export async function tempEdit(content: string) {
@@ -257,138 +298,3 @@ export async function tempEdit(content: string) {
   })
 }
 
-import { EventEmitter } from 'node:events';
-import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
-import { promises as fs } from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-
-export class OpenFilesManager extends EventEmitter {
-  private client: NeovimClient | null = null;
-  private _state: { visibleFiles: { filePath: string; content: string }[] } = { visibleFiles: [] };
-
-  constructor() {
-    super();
-  }
-
-  async initialize() {
-    this.client = await getClient();
-    if (!this.client) {
-      console.log("Could not connect to neovim for OpenFilesManager");
-      return;
-    }
-    await this.updateState();
-
-    registerAutocmd(['BufEnter', 'BufWritePost', 'BufDelete'], {}, async () => {
-      await this.updateState();
-      this.emit('onDidChange');
-    });
-  }
-
-  private async updateState() {
-    if (!this.client) {
-      return;
-    }
-    const buffers = await this.client.buffers;
-    const visibleFiles = [];
-    for (const buf of buffers) {
-      const isListed = await buf.getOption('buflisted');
-      if (!isListed) continue;
-
-      const name = await buf.name;
-      if (name && !name.startsWith('term:')) {
-        try {
-          // check if file exists
-          await fs.access(name);
-          const lines = await buf.getLines();
-          visibleFiles.push({
-            filePath: name,
-            content: lines.join('\n'),
-          });
-        } catch (e) {
-          // file doesn't exist, probably a buffer without a file
-        }
-      }
-    }
-    this._state = { visibleFiles };
-  }
-
-  get state() {
-    return this._state;
-  }
-}
-
-export class DiffManager extends EventEmitter {
-  private activeDiffs: Map<string, { tempPath: string }> = new Map();
-  private client: NeovimClient | null = null;
-
-  constructor() {
-    super();
-  }
-
-  async initialize() {
-    this.client = await getClient();
-  }
-
-  async showDiff(filePath: string, newContent: string) {
-    if (!this.client) {
-      console.log("Could not connect to neovim for DiffManager");
-      return;
-    }
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neovim-ide-'));
-    const tempPath = path.join(tempDir, path.basename(filePath));
-    await fs.writeFile(tempPath, newContent);
-
-    this.activeDiffs.set(filePath, { tempPath });
-
-    diff(filePath, tempPath).then(async () => {
-      const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
-      const tempContent = await fs.readFile(tempPath, 'utf-8');
-
-      const notification: JSONRPCNotification = {
-        jsonrpc: '2.0',
-        method: 'ide/diffUpdate',
-        params: {
-          filePath,
-          status: originalContent === tempContent ? 'accepted' : 'rejected',
-        },
-      };
-      this.emit('onDidChange', notification);
-
-      await fs.unlink(tempPath);
-      await fs.rmdir(tempDir).catch(e => console.error(`Could not remove temp dir ${tempDir}`, e));
-      this.activeDiffs.delete(filePath);
-    });
-  }
-
-  async closeDiff(filePath: string) {
-    const diffInfo = this.activeDiffs.get(filePath);
-    if (!diffInfo || !this.client) {
-      return;
-    }
-
-    const windows = await this.client.windows;
-    for (const win of windows) {
-      try {
-        const buf = await win.buffer;
-        const bufName = await buf.name;
-        if (bufName === filePath || bufName === diffInfo.tempPath) {
-          await win.close();
-        }
-      } catch (e) {
-        // ignore errors, window might be gone
-      }
-    }
-  }
-}
-
-export async function saveServerPort(port: string) {
-  const nvimAddr = (process.env['NVIM_LISTEN_ADDRESS'] ?? '')
-    .replaceAll('/', '_')
-  console.log(nvimAddr)
-  const p = path.resolve(
-    '/tmp',
-    nvimAddr
-  )
-  await fs.writeFile(p, port)
-}
