@@ -7,7 +7,10 @@ import type { NeovimClient } from 'neovim';
 import { diff, getClient } from './neovim.js';
 
 export class DiffManager extends EventEmitter {
-    private activeDiffs: Map<string, { tempPath: string }> = new Map();
+    private activeDiffs: Map<string, {
+        oldFilePath: string
+        newFilePath: string
+    }> = new Map();
     private client: NeovimClient | null = null;
 
     constructor() {
@@ -24,26 +27,32 @@ export class DiffManager extends EventEmitter {
             return;
         }
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neovim-ide-'));
-        const tempPath = path.join(tempDir, path.basename(filePath));
-        await fs.writeFile(tempPath, newContent);
+        const newFilePath = path.join(tempDir, 'new-' + path.basename(filePath));
+        const oldFilePath = path.join(tempDir, 'old-' + path.basename(filePath));
+        await Promise.all([
+            await fs.writeFile(oldFilePath, await fs.readFile(filePath)),
+            await fs.writeFile(newFilePath, newContent)
+        ])
 
-        this.activeDiffs.set(filePath, { tempPath });
+        this.activeDiffs.set(filePath, { oldFilePath: oldFilePath, newFilePath: newFilePath });
 
-        diff(filePath, tempPath).then(async () => {
+        diff(oldFilePath, newFilePath).then(async () => {
             const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
-            const tempContent = await fs.readFile(tempPath, 'utf-8');
-
+            const tempContent = await fs.readFile(newFilePath, 'utf-8');
+            //TODO: rejected
             const notification: JSONRPCNotification = {
                 jsonrpc: '2.0',
                 method: 'ide/diffUpdate',
                 params: {
                     filePath,
-                    status: originalContent === tempContent ? 'accepted' : 'rejected',
+                    status: 'accepted',
+                    content: tempContent
                 },
             };
             this.emit('onDidChange', notification);
 
-            await fs.unlink(tempPath);
+            await fs.unlink(newFilePath);
+            await fs.unlink(oldFilePath);
             await fs.rmdir(tempDir).catch(e => console.error(`Could not remove temp dir ${tempDir}`, e));
             this.activeDiffs.delete(filePath);
         });
@@ -60,7 +69,7 @@ export class DiffManager extends EventEmitter {
             try {
                 const buf = await win.buffer;
                 const bufName = await buf.name;
-                if (bufName === filePath || bufName === diffInfo.tempPath) {
+                if (bufName === diffInfo.oldFilePath || bufName === diffInfo.newFilePath) {
                     await win.close();
                 }
             } catch (e) {
