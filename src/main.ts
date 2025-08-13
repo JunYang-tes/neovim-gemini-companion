@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { IDEServer } from './ide-server.js';
 
 async function main() {
