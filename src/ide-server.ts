@@ -10,7 +10,6 @@ import { Server as HTTPServer } from 'node:http';
 import { z } from 'zod';
 import { DiffManager } from './diff-manager.js';
 import { OpenFilesManager } from './open-files-manager.js';
-import { saveServerPort } from './neovim.js'
 
 const MCP_SESSION_ID_HEADER = 'mcp-session-id';
 
@@ -190,11 +189,6 @@ export class IDEServer {
         const port = address.port;
         // Instead of environment variables, just log the port
         this.log(`IDE server listening on port ${port}`);
-        saveServerPort(port.toString())
-          .catch(e => {
-            console.error("Failed to save server port")
-            process.exit(1)
-          })
       }
     });
   }

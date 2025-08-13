@@ -5,6 +5,7 @@ import * as path from 'path';
 import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import type { NeovimClient } from 'neovim';
 import { diff, getClient } from './neovim.js';
+import { match } from 'ts-pattern'
 
 export class DiffManager extends EventEmitter {
     private activeDiffs: Map<string, {
@@ -36,20 +37,41 @@ export class DiffManager extends EventEmitter {
 
         this.activeDiffs.set(filePath, { oldFilePath: oldFilePath, newFilePath: newFilePath });
 
-        diff(oldFilePath, newFilePath).then(async () => {
+        diff(oldFilePath, newFilePath).then(async (result) => {
             const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
             const tempContent = await fs.readFile(newFilePath, 'utf-8');
             //TODO: rejected
             const notification: JSONRPCNotification = {
                 jsonrpc: '2.0',
                 method: 'ide/diffUpdate',
-                params: {
+                params: result === 'accepted' ? {
                     filePath,
                     status: 'accepted',
                     content: tempContent
+                } : {
+                    filePath,
+                    status: 'rejected',
                 },
             };
-            this.emit('onDidChange', notification);
+            this.emit('onDidChange', match(result)
+                .with('accepted', () => ({
+                    jsonrpc: '2.0',
+                    method: 'ide/diffAccepted',
+                    params: {
+                        filePath: filePath,
+                        content: tempContent
+                    }
+                }))
+                .with('rejected', () => ({
+                    jsonrpc: '2.0',
+                    method: 'ide/diffClosed',
+                    params: {
+                        filePath: filePath,
+                        content: undefined
+                    }
+                }))
+                .exhaustive()
+            );
 
             await fs.unlink(newFilePath);
             await fs.unlink(oldFilePath);

@@ -1,5 +1,6 @@
 import type { NeovimClient, Buffer } from 'neovim';
 import { fileURLToPath } from 'url';
+import logger from './log.js';
 
 export interface NeovimSession {
   client: NeovimClient;
@@ -21,6 +22,9 @@ export async function getClient(): Promise<NeovimClient | null> {
     const attach = await import('neovim').then((m) => m.attach);
     const client = attach({
       socket: process.env['NVIM_LISTEN_ADDRESS'],
+      options: {
+        logger: logger
+      }
     });
 
     client.on('disconnect', () => {
@@ -30,13 +34,27 @@ export async function getClient(): Promise<NeovimClient | null> {
     sharedClient = client;
     return sharedClient;
   } catch (e) {
-    console.error('Failed to connect to Neovim');
+    logger.error('Failed to connect to Neovim');
     if ((e as Error).message) {
-      console.error(e.message);
+      logger.error(e.message);
     }
     return null;
   }
 }
+
+export async function onNotification(cb: (m: string, args: any[]) => boolean) {
+  const nvim = await getClient();
+  if (nvim) {
+    const notificationHandler = (m: string, args: any[]) => {
+      if (cb(m, args)) {
+        nvim.off('notification', notificationHandler);
+      }
+    }
+    nvim.on('notification', notificationHandler);
+  }
+}
+
+
 export async function findBuffer(
   predict: (b: Buffer) => Promise<boolean> | boolean,
 ) {
@@ -229,23 +247,31 @@ export async function diff(oldPath: string, newPath: string) {
 
   let resolved = false;
 
-  const doResolve = (result: DiffResult) => {
+  const doResolve = async (result: DiffResult) => {
     if (resolved) {
       return;
     }
     resolved = true;
+    await Promise.all([
+      findBuffer(async b => {
+        const name = await b.name;
+        logger.debug(name);
+        return name === oldPath
+      }).then(b => b && nvim.command(`bdelete! ${b.id}`)),
+      findBuffer(async b => (await b.name) === newPath)
+        .then(async b => {
+          if (b) {
+            await nvim.request("nvim_win_set_buf", [0, b.id]);
+            await nvim.command("w")
+            await nvim.command(`bdelete! ${b.id}`)
+          }
+        })
+    ])
     resolve(result);
   };
 
   const acceptId = `diff_accept_${++diffCounter}`;
-  autocmdCallbacks.set(acceptId, () => {
-    doResolve("accepted");
-  });
-
   const rejectId = `diff_reject_${++diffCounter}`;
-  autocmdCallbacks.set(rejectId, () => {
-    doResolve("rejected");
-  });
 
   const leaveCallback = () => {
     doResolve("accepted");
@@ -256,20 +282,34 @@ export async function diff(oldPath: string, newPath: string) {
   registerAutocmd("BufWinLeave", { pattern: newPath }, leaveCallback)
 
   const channelId = await nvim.channelId;
-  const method = "nvim_AUTOCMD_CALLBACK";
+  const method = "diff-keymap";
 
   const setKeymaps = async (bufnr: number) => {
     const luaCode = `
+        print("set keymaps")
         local bufnr, channelId, method, acceptId, rejectId = ...
         vim.keymap.set('n', 'a', function() 
+print("a")
             vim.rpcnotify(channelId, method, acceptId)
         end, { buffer = bufnr, nowait = true })
         vim.keymap.set('n', 'r', function() 
+print("r")
             vim.rpcnotify(channelId, method, rejectId)
         end, { buffer = bufnr, nowait = true })
       `;
     await nvim.lua(luaCode, [bufnr, channelId, method, acceptId, rejectId]);
   };
+  onNotification((m, args) => {
+    if (m === method) {
+      if (args[0] === acceptId) {
+        doResolve("accepted");
+      } else if (args[0] === rejectId) {
+        doResolve("rejected");
+      }
+      return true
+    }
+    return false
+  })
 
   const oldPathBufnr = await nvim.call("bufnr", "%" as any);
   await nvim.command("wincmd w");
@@ -278,6 +318,17 @@ export async function diff(oldPath: string, newPath: string) {
 
   await setKeymaps(oldPathBufnr as number);
   await setKeymaps(newPathBufnr as number);
+
+  const nsId = await nvim.request('nvim_create_namespace', ["neovim-ide-companion-diff"]);
+  const setVirtualText = async (bufnr: number) => {
+    await nvim.request('nvim_buf_set_extmark', [bufnr, nsId, 0, -1, {
+      virt_text: [[" a: accept all, r: reject all", "Comment"]],
+      virt_text_pos: "overlay",
+    }]);
+  };
+
+  await setVirtualText(newPathBufnr as number);
+
 
   return promise;
 }

@@ -14,6 +14,12 @@ dependencies:
   neovim:
     specifier: ^5.3.0
     version: 5.3.0
+  ts-pattern:
+    specifier: ^5.8.0
+    version: 5.8.0
+  winston:
+    specifier: 3.14.1
+    version: 3.14.1
   zod:
     specifier: ^3.25.76
     version: 3.25.76
@@ -832,6 +838,10 @@ packages:
   /triple-beam@1.4.1:
     resolution: {integrity: sha512-aZbgViZrg1QNcG+LULa7nhZpJTZSLm/mXnHXnbAbjmN5aSa0y7V+wvv6+4WaBtpISJzThKy+PIPxc1Nq1EJ9mg==}
     engines: {node: '>= 14.0.0'}
+    dev: false
+
+  /ts-pattern@5.8.0:
+    resolution: {integrity: sha512-kIjN2qmWiHnhgr5DAkAafF9fwb0T5OhMVSWrm8XEdTFnX6+wfXwYOFjeF86UZ54vduqiR7BfqScFmXSzSaH8oA==}
     dev: false
 
   /type-is@2.0.1:
