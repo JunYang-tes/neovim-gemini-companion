@@ -4,8 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import type { NeovimClient } from 'neovim';
-import { diff, getClient } from './neovim.js';
+import { diff, findBuffer, getClient } from './neovim.js';
 import { match } from 'ts-pattern'
+import logger from './log.js';
 
 export class DiffManager extends EventEmitter {
     private activeDiffs: Map<string, {
@@ -72,6 +73,16 @@ export class DiffManager extends EventEmitter {
                 }))
                 .exhaustive()
             );
+            setTimeout(() => {
+                findBuffer(async b => (await b.name) === filePath)
+                    .then(async b => {
+                        if (b) {
+                            logger.debug('call checktime for ' + filePath);
+                            this.client?.command(`checktime ${b.id}`);
+                        }
+                    })
+
+            }, 500)
 
             await fs.unlink(newFilePath);
             await fs.unlink(oldFilePath);
