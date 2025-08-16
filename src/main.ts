@@ -11,7 +11,7 @@ async function main() {
   const portArg = process.argv.find((arg) => arg.startsWith('--port='));
   const port = portArg ? parseInt(portArg.split('=')[1], 10) : 0;
 
-  const server = new IDEServer(console.log);
+  const server = new IDEServer();
   await server.start(port);
 }
 

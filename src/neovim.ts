@@ -36,7 +36,7 @@ export async function getClient(): Promise<NeovimClient | null> {
   } catch (e) {
     logger.error('Failed to connect to Neovim');
     if ((e as Error).message) {
-      logger.error(e.message);
+      logger.error((e as Error).message);
     }
     return null;
   }

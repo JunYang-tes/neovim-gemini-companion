@@ -9,6 +9,7 @@ import {
 import { Server as HTTPServer } from 'node:http';
 import { z } from 'zod';
 import { DiffManager } from './diff-manager.js';
+import logger from './log.js';
 import { OpenFilesManager } from './open-files-manager.js';
 
 const MCP_SESSION_ID_HEADER = 'mcp-session-id';
@@ -29,12 +30,10 @@ function sendIdeContextUpdateNotification(
 
 export class IDEServer {
   private server: HTTPServer | undefined;
-  private log: (message: string) => void;
   diffManager: DiffManager;
   openFilesManager: OpenFilesManager;
 
-  constructor(log: (message: string) => void) {
-    this.log = log;
+  constructor() {
     this.diffManager = new DiffManager();
     this.openFilesManager = new OpenFilesManager();
   }
@@ -81,7 +80,7 @@ export class IDEServer {
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSessionId) => {
-            this.log(`New session initialized: ${newSessionId}`);
+            logger.info(`New session initialized: ${newSessionId}`);
             transports[newSessionId] = transport;
           },
         });
@@ -89,7 +88,7 @@ export class IDEServer {
           try {
             transport.send({ jsonrpc: '2.0', method: 'ping' });
           } catch (e) {
-            this.log(
+            logger.error(
               'Failed to send keep-alive ping, cleaning up interval.' + e,
             );
             clearInterval(keepAlive);
@@ -99,14 +98,14 @@ export class IDEServer {
         transport.onclose = () => {
           clearInterval(keepAlive);
           if (transport.sessionId) {
-            this.log(`Session closed: ${transport.sessionId}`);
+            logger.info(`Session closed: ${transport.sessionId}`);
             sessionsWithInitialNotification.delete(transport.sessionId);
             delete transports[transport.sessionId];
           }
         };
         mcpServer.connect(transport);
       } else {
-        this.log(
+        logger.warn(
           'Bad Request: No valid session ID provided for non-initialize request.',
         );
         res.status(400).json({
@@ -126,7 +125,7 @@ export class IDEServer {
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
-        this.log(`Error handling MCP request: ${errorMessage}`);
+        logger.error(`Error handling MCP request: ${errorMessage}`);
         if (!res.headersSent) {
           res.status(500).json({
             jsonrpc: '2.0' as const,
@@ -145,7 +144,7 @@ export class IDEServer {
         | string
         | undefined;
       if (!sessionId || !transports[sessionId]) {
-        this.log('Invalid or missing session ID');
+        logger.warn('Invalid or missing session ID');
         res.status(400).send('Invalid or missing session ID');
         return;
       }
@@ -156,7 +155,7 @@ export class IDEServer {
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error';
-        this.log(`Error handling session request: ${errorMessage}`);
+        logger.error(`Error handling session request: ${errorMessage}`);
         if (!res.headersSent) {
           res.status(400).send('Bad Request');
         }
@@ -178,7 +177,7 @@ export class IDEServer {
       if (address && typeof address !== 'string') {
         const port = address.port;
         // Instead of environment variables, just log the port
-        this.log(`IDE server listening on port ${port}`);
+        logger.info(`IDE server listening on port ${port}`);
       }
     });
   }
@@ -188,10 +187,10 @@ export class IDEServer {
       await new Promise<void>((resolve, reject) => {
         this.server!.close((err?: Error) => {
           if (err) {
-            this.log(`Error shutting down IDE server: ${err.message}`);
+            logger.error(`Error shutting down IDE server: ${err.message}`);
             return reject(err);
           }
-          this.log(`IDE server shut down`);
+          logger.info(`IDE server shut down`);
           resolve();
         });
       });
@@ -224,7 +223,7 @@ const createMcpServer = (diffManager: DiffManager) => {
       newContent,
     }: {
       filePath: string;
-      newContent?: string;
+      newContent?: string 
     }) => {
       await diffManager.showDiff(filePath, newContent ?? '');
       return {
@@ -259,5 +258,3 @@ const createMcpServer = (diffManager: DiffManager) => {
   );
   return server;
 };
-
-
