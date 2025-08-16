@@ -39,7 +39,6 @@ export class IDEServer {
   }
 
   async start(port: number) {
-    await this.diffManager.initialize();
     await this.openFilesManager.initialize();
 
     const sessionsWithInitialNotification = new Set<string>();

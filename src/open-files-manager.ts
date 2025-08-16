@@ -76,14 +76,17 @@ export class OpenFilesManager extends EventEmitter {
 
 
   private async addFile(filePath: string, buf: number) {
+    const idx = this.files.findIndex(f => f.path === filePath);
     try {
       await fs.access(filePath)
     } catch (e) {
       logger.debug("File does not exist " + filePath)
+      if (idx !== -1) {
+        this.files.splice(idx, 1)
+      }
       return
     }
 
-    const idx = this.files.findIndex(f => f.path === filePath);
     if (idx !== -1) {
       const file = this.files[idx]!;
       this.files.splice(idx, 1);
@@ -123,6 +126,9 @@ export class OpenFilesManager extends EventEmitter {
   }
 
   private async updateActiveFile(filePath: string, buf: number) {
+    if (filePath.startsWith("term:")) {
+      return
+    }
     const currentBuf = await nvim.buffer.id
     if (currentBuf === buf) {
       const getOption = await nvim.buffer.getOption
@@ -168,7 +174,7 @@ export class OpenFilesManager extends EventEmitter {
   }
 
   get state() {
-    logger.debug("Current Opened filess")
+    logger.debug("Current Opened files")
     this.files.forEach(file => {
       logger.debug(`${file.isActive ? '[Actived]' : ''} ${file.path}`)
     })

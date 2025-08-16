@@ -214,6 +214,7 @@ export async function diff(oldPath: string, newPath: string) {
   let resolved = false;
 
   const doResolve = async (result: DiffResult) => {
+    logger.debug("resolve diff " + result)
     if (resolved) {
       return;
     }
@@ -280,6 +281,7 @@ print("r")
   };
   onNotification((m, args) => {
     if (m === method) {
+      logger.debug("a or n pressed")
       if (args[0] === acceptId) {
         doResolve("accepted");
       } else if (args[0] === rejectId) {

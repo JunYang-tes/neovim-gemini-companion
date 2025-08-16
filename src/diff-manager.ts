@@ -32,18 +32,6 @@ export class DiffManager extends EventEmitter {
         diff(oldFilePath, newFilePath).then(async (result) => {
             const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
             const tempContent = await fs.readFile(newFilePath, 'utf-8');
-            const notification: JSONRPCNotification = {
-                jsonrpc: '2.0',
-                method: 'ide/diffUpdate',
-                params: result === 'accepted' ? {
-                    filePath,
-                    status: 'accepted',
-                    content: tempContent
-                } : {
-                    filePath,
-                    status: 'rejected',
-                },
-            };
             this.emit('onDidChange', match(result)
                 .with('accepted', () => ({
                     jsonrpc: '2.0',
