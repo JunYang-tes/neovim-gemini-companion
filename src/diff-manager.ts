@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import type { NeovimClient } from 'neovim';
-import { diff, findBuffer, getClient } from './neovim.js';
+import { diff, findBuffer, nvim } from './neovim.js';
 import { match } from 'ts-pattern'
 import logger from './log.js';
 
@@ -13,21 +13,12 @@ export class DiffManager extends EventEmitter {
         oldFilePath: string
         newFilePath: string
     }> = new Map();
-    private client: NeovimClient | null = null;
 
     constructor() {
         super();
     }
 
-    async initialize() {
-        this.client = await getClient();
-    }
-
     async showDiff(filePath: string, newContent: string) {
-        if (!this.client) {
-            console.log("Could not connect to neovim for DiffManager");
-            return;
-        }
         const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neovim-ide-'));
         const newFilePath = path.join(tempDir, 'new-' + path.basename(filePath));
         const oldFilePath = path.join(tempDir, 'old-' + path.basename(filePath));
@@ -41,7 +32,6 @@ export class DiffManager extends EventEmitter {
         diff(oldFilePath, newFilePath).then(async (result) => {
             const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
             const tempContent = await fs.readFile(newFilePath, 'utf-8');
-            //TODO: rejected
             const notification: JSONRPCNotification = {
                 jsonrpc: '2.0',
                 method: 'ide/diffUpdate',
@@ -78,7 +68,7 @@ export class DiffManager extends EventEmitter {
                     .then(async b => {
                         if (b) {
                             logger.debug('call checktime for ' + filePath);
-                            this.client?.command(`checktime ${b.id}`);
+                            nvim.command(`checktime ${b.id}`);
                         }
                     })
 
@@ -93,11 +83,11 @@ export class DiffManager extends EventEmitter {
 
     async closeDiff(filePath: string) {
         const diffInfo = this.activeDiffs.get(filePath);
-        if (!diffInfo || !this.client) {
+        if (!diffInfo) {
             return;
         }
 
-        const windows = await this.client.windows;
+        const windows = await nvim.windows;
         for (const win of windows) {
             try {
                 const buf = await win.buffer;

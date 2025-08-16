@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'fs';
 import type { NeovimClient } from 'neovim';
-import { filterBuffer, findBuffer, getClient, registerAutocmd } from './neovim.js';
+import { filterBuffer, findBuffer, nvim, registerAutocmd } from './neovim.js';
 import logger from './log.js';
 import { match } from 'ts-pattern';
 
@@ -22,7 +22,6 @@ const MAX_SELECTED_TEXT_LENGTH = 16384; // 16 KiB limit
 
 
 export class OpenFilesManager extends EventEmitter {
-  private client: NeovimClient | null = null;
   private files: File[]
   private debounceTimer: NodeJS.Timeout | null = null
 
@@ -32,14 +31,9 @@ export class OpenFilesManager extends EventEmitter {
   }
 
   async initialize() {
-    this.client = await getClient();
-    if (!this.client) {
-      console.log("Could not connect to neovim for OpenFilesManager");
-      return;
-    }
     await this.initFiles();
 
-    registerAutocmd(['BufWritePost', 'BufDelete','BufEnter'], {}, async (arg) => {
+    registerAutocmd(['BufWritePost', 'BufDelete', 'BufEnter'], {}, async (arg) => {
       logger.debug("Autocmd " + arg.event)
       logger.debug("File " + arg.file)
       match(arg.event as string)
@@ -129,19 +123,17 @@ export class OpenFilesManager extends EventEmitter {
   }
 
   private async updateActiveFile(filePath: string, buf: number) {
-    if (this.client) {
-      const currentBuf = await this.client.buffer.id
-      if (currentBuf === buf) {
-        const getOption = await this.client.buffer.getOption
-        if ((await getOption('buftype')) != 'nofile') {
-          const idx = this.files.findIndex(f => f.path === filePath);
-          if (idx !== -1) {
-            this.clearActive()
-            const file = this.files[idx]!;
-            file.isActive = true;
-          } else {
-            logger.error("Could not find file in files" + filePath)
-          }
+    const currentBuf = await nvim.buffer.id
+    if (currentBuf === buf) {
+      const getOption = await nvim.buffer.getOption
+      if ((await getOption('buftype')) != 'nofile') {
+        const idx = this.files.findIndex(f => f.path === filePath);
+        if (idx !== -1) {
+          this.clearActive()
+          const file = this.files[idx]!;
+          file.isActive = true;
+        } else {
+          logger.error("Could not find file in files" + filePath)
         }
       }
     }
@@ -149,9 +141,6 @@ export class OpenFilesManager extends EventEmitter {
 
 
   private async initFiles() {
-    if (!this.client) {
-      return;
-    }
     const buffers = await filterBuffer(async (buf) => {
       const isListed = await buf.getOption('buflisted');
       if (!isListed) return false;

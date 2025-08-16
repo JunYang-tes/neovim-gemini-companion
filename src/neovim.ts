@@ -1,68 +1,44 @@
 import type { NeovimClient, Buffer } from 'neovim';
 import { fileURLToPath } from 'url';
 import logger from './log.js';
+import { attach } from 'neovim'
 
 export interface NeovimSession {
   client: NeovimClient;
   disconnect: () => void;
 }
 
-let sharedClient: NeovimClient | null = null;
-
-export async function getClient(): Promise<NeovimClient | null> {
-  if (sharedClient) {
-    return sharedClient;
-  }
-
-  if (!process.env['NVIM_LISTEN_ADDRESS']) {
-    return null;
-  }
-
-  try {
-    const attach = await import('neovim').then((m) => m.attach);
-    const client = attach({
-      socket: process.env['NVIM_LISTEN_ADDRESS'],
-      options: {
-        logger: logger
-      }
-    });
-
-    client.on('disconnect', () => {
-      sharedClient = null;
-    });
-
-    sharedClient = client;
-    return sharedClient;
-  } catch (e) {
-    logger.error('Failed to connect to Neovim');
-    if ((e as Error).message) {
-      logger.error((e as Error).message);
-    }
-    return null;
-  }
+if (!process.env['NVIM_LISTEN_ADDRESS']) {
+  logger.error('environment variable NVIM_LISTEN_ADDRESS is not set');
+  process.exit(1);
 }
 
-export async function onNotification(cb: (m: string, args: any[]) => boolean) {
-  const nvim = await getClient();
-  if (nvim) {
-    const notificationHandler = (m: string, args: any[]) => {
-      if (cb(m, args)) {
-        nvim.off('notification', notificationHandler);
-      }
-    }
-    nvim.on('notification', notificationHandler);
+
+export const nvim: NeovimClient = attach({
+  socket: process.env['NVIM_LISTEN_ADDRESS'],
+  options: {
+    logger: logger
   }
+})
+nvim.on('disconnect', () => {
+  logger.error('Neovim disconnected');
+  process.exit(1);
+})
+
+
+export async function onNotification(cb: (m: string, args: any[]) => boolean) {
+  const notificationHandler = (m: string, args: any[]) => {
+    if (cb(m, args)) {
+      nvim.off('notification', notificationHandler);
+    }
+  }
+  nvim.on('notification', notificationHandler);
 }
 
 
 export async function findBuffer(
   predict: (b: Buffer) => Promise<boolean> | boolean,
 ) {
-  const nvim = await getClient();
-  if (nvim === null) {
-    return null;
-  }
-
   const buffers = await nvim.buffers;
   for (const buf of buffers) {
     if (await predict(buf)) {
@@ -75,11 +51,6 @@ export async function findBuffer(
 export async function filterBuffer(
   predict: (b: Buffer) => Promise<boolean> | boolean
 ) {
-  const nvim = await getClient();
-  if (nvim === null) {
-    return [] as Buffer[];
-  }
-
   const buffers = await nvim.buffers;
   return (await Promise.all(buffers.map(async b => [b, await predict(b)] as const)))
     .filter(([b, p]) => p)
@@ -103,13 +74,6 @@ export function withResolvers<T>() {
 }
 
 export async function editInNewTab(filepathOrUrl: string) {
-
-  const nvim = await getClient();
-  if (!nvim) {
-    return null;
-  }
-
-
   const filepath = filepathOrUrl.startsWith("file://")
     ? fileURLToPath(filepathOrUrl)
     : filepathOrUrl;
@@ -154,10 +118,6 @@ export async function registerAutocmd(
   // biome-ignore lint/suspicious/noConfusingVoidType: -_-!
   callback: (...args: any[]) => void | boolean | Promise<undefined | boolean>,
 ) {
-  const nvim = await getClient();
-  if (!nvim) {
-    return null;
-  }
   const method = "nvim_AUTOCMD_CALLBACK";
   if (callbackIdCounter === 0) {
     nvim.on("notification", (m: string, args: any[]) => {
@@ -222,11 +182,6 @@ export async function createTransientBuffer(content: string, ft = "") {
 }
 
 export async function createBuffer(content: string, ft = "") {
-
-  const nvim = await getClient();
-  if (!nvim) {
-    return null;
-  }
   nvim.command("tabnew");
   let buf = await nvim.createBuffer(false, true);
   if (typeof buf === "number") {
@@ -250,10 +205,6 @@ export type DiffResult = 'accepted' | 'rejected'
 
 let diffCounter = 0
 export async function diff(oldPath: string, newPath: string) {
-  const nvim = await getClient();
-  if (!nvim) {
-    return "rejected";
-  }
   await nvim.command(`tabnew ${newPath}`);
   await nvim.command(`vert diffsplit ${oldPath}`);
 
@@ -348,7 +299,6 @@ print("r")
 }
 
 export async function tempEdit(content: string) {
-  const nvim = await getClient();
   const buf = await createBuffer(content)
   if (buf == null || nvim == null) {
     return null
