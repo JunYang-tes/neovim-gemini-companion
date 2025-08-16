@@ -258,8 +258,8 @@ export async function diff(oldPath: string, newPath: string) {
     return true; // unregister self
   };
 
-  registerAutocmd("BufWinLeave", { pattern: oldPath }, leaveCallback)
-  registerAutocmd("BufWinLeave", { pattern: newPath }, leaveCallback)
+  //registerAutocmd(["BufWinLeave"], { pattern: oldPath }, leaveCallback)
+  registerAutocmd(["BufWritePost"], { pattern: newPath }, leaveCallback)
 
   const channelId = await nvim.channelId;
   const method = "diff-keymap";
@@ -291,24 +291,35 @@ print("r")
     }
     return false
   })
+  const [oldBuf, newBuf] = await Promise.all([
+    findBuffer(async b => isSameFile(await b.name, oldPath)),
+    findBuffer(async b => isSameFile(await b.name, newPath))
+  ])
+  if (oldBuf == null || newBuf == null) {
+    logger.error("Cannot find buffers corresponding to " + oldPath + " and " + newPath)
+    return promise
+  }
 
-  const oldPathBufnr = await nvim.call("bufnr", "%" as any);
-  await nvim.command("wincmd w");
-  const newPathBufnr = await nvim.call("bufnr", "%" as any);
-  await nvim.command("wincmd p"); // return to original window
-
-  await setKeymaps(oldPathBufnr as number);
-  await setKeymaps(newPathBufnr as number);
+  await setKeymaps(oldBuf.id as number);
+  await setKeymaps(newBuf.id as number);
+  for (const win of await nvim.windows) {
+    const b = await win.buffer;
+    if (b.id === newBuf.id) {
+      await nvim.request("nvim_set_current_win", [win.id]);
+      break;
+    }
+  }
 
   const nsId = await nvim.request('nvim_create_namespace', ["neovim-ide-companion-diff"]);
   const setVirtualText = async (bufnr: number) => {
     await nvim.request('nvim_buf_set_extmark', [bufnr, nsId, 0, -1, {
       virt_text: [[" a: accept all, r: reject all", "Comment"]],
-      virt_text_pos: "overlay",
+      virt_text_pos: "inline",
     }]);
   };
 
-  await setVirtualText(newPathBufnr as number);
+  await setVirtualText(newBuf.id)
+  await setVirtualText(oldBuf.id)
 
 
   return promise;
