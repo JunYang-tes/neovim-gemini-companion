@@ -15,7 +15,6 @@ const MCP_SESSION_ID_HEADER = 'mcp-session-id';
 
 function sendIdeContextUpdateNotification(
   transport: StreamableHTTPServerTransport,
-  log: (message: string) => void,
   openFilesManager: OpenFilesManager,
 ) {
   const ideContext = openFilesManager.state;
@@ -25,13 +24,6 @@ function sendIdeContextUpdateNotification(
     method: 'ide/contextUpdate',
     params: ideContext,
   };
-  log(
-    `Sending IDE context update notification: ${JSON.stringify(
-      notification,
-      null,
-      2,
-    )}`,
-  );
   transport.send(notification);
 }
 
@@ -63,7 +55,6 @@ export class IDEServer {
       for (const transport of Object.values(transports)) {
         sendIdeContextUpdateNotification(
           transport,
-          this.log.bind(this),
           this.openFilesManager,
         );
       }
@@ -174,7 +165,6 @@ export class IDEServer {
       if (!sessionsWithInitialNotification.has(sessionId)) {
         sendIdeContextUpdateNotification(
           transport,
-          this.log.bind(this),
           this.openFilesManager,
         );
         sessionsWithInitialNotification.add(sessionId);

@@ -72,6 +72,20 @@ export async function findBuffer(
   return null;
 }
 
+export async function filterBuffer(
+  predict: (b: Buffer) => Promise<boolean> | boolean
+) {
+  const nvim = await getClient();
+  if (nvim === null) {
+    return [] as Buffer[];
+  }
+
+  const buffers = await nvim.buffers;
+  return (await Promise.all(buffers.map(async b => [b, await predict(b)] as const)))
+    .filter(([b, p]) => p)
+    .map(([b]) => b);
+}
+
 
 export function withResolvers<T>() {
   let resolve: (v: T | PromiseLike<T>) => void;

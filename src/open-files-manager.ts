@@ -1,15 +1,34 @@
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'fs';
 import type { NeovimClient } from 'neovim';
-import { getClient, registerAutocmd } from './neovim.js';
+import { filterBuffer, findBuffer, getClient, registerAutocmd } from './neovim.js';
+import logger from './log.js';
+import { match } from 'ts-pattern';
 
-//TODO: fix this ai generated code
+type File = {
+  path: string;
+  timestamp: number;
+  cursor?: {
+    line: number;
+    character: number;
+  } | undefined;
+  isActive?: boolean | undefined;
+  selectedText?: string | undefined;
+}
+
+export const MAX_FILES = 10;
+const MAX_SELECTED_TEXT_LENGTH = 16384; // 16 KiB limit
+
+
+
 export class OpenFilesManager extends EventEmitter {
   private client: NeovimClient | null = null;
-  private _state: { visibleFiles: { filePath: string; content: string }[] } = { visibleFiles: [] };
+  private files: File[]
+  private debounceTimer: NodeJS.Timeout | null = null
 
   constructor() {
     super();
+    this.files = []
   }
 
   async initialize() {
@@ -18,43 +37,157 @@ export class OpenFilesManager extends EventEmitter {
       console.log("Could not connect to neovim for OpenFilesManager");
       return;
     }
-    await this.updateState();
+    await this.initFiles();
 
-    registerAutocmd(['BufWritePost', 'BufDelete'], {}, async () => {
-      await this.updateState();
-      this.emit('onDidChange');
+    registerAutocmd(['BufWritePost', 'BufDelete','BufEnter'], {}, async (arg) => {
+      logger.debug("Autocmd " + arg.event)
+      logger.debug("File " + arg.file)
+      match(arg.event as string)
+        .with("BufWritePost", async () => {
+          await this.addFile(arg.file, arg.buf)
+        })
+        .with("BufDelete", async () => {
+          this.remove(arg.file)
+        })
+        .with("BufEnter", async () => {
+          await this.addFile(arg.file, arg.buf)
+        })
+        .otherwise(async () => {
+          logger.warn("Unknown handled autocmd " + arg.event)
+        })
+        .then(() => {
+          return this.updateActiveFile(arg.file, arg.buf)
+        })
+        .then(() => {
+          if (this.files.length > MAX_FILES) {
+            const deleteCnt = this.files.length - MAX_FILES
+            this.files.splice(MAX_FILES - 1, deleteCnt)
+          }
+        })
+        .finally(() => {
+          this.fireWithDebounce()
+        })
+      return false
     });
   }
+  private fireWithDebounce() {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+    }
+    this.debounceTimer = setTimeout(() => {
+      logger.debug("fireWithDebounce")
+      this.emit('onDidChange');
+    }, 50); // 50ms
+  }
 
-  private async updateState() {
+
+  private async addFile(filePath: string, buf: number) {
+    try {
+      await fs.access(filePath)
+    } catch (e) {
+      logger.debug("File does not exist " + filePath)
+      return
+    }
+
+    const idx = this.files.findIndex(f => f.path === filePath);
+    if (idx !== -1) {
+      const file = this.files[idx]!;
+      this.files.splice(idx, 1);
+      this.files.push(file)
+    } else {
+      const buffer = await findBuffer(async (b) => b.id === buf);
+      if (buffer != null) {
+        const buftype = await buffer.getOption('buftype')
+        if (buftype === 'nofile') {
+          logger.debug("Ignoring nofile buffer")
+        } else {
+          this.files.push({
+            path: filePath,
+            timestamp: Date.now(),
+          })
+        }
+      }
+    }
+  }
+  private async updateTimestamp(filePath: string) {
+    const idx = this.files.findIndex(f => f.path === filePath);
+    if (idx !== -1) {
+      const file = this.files[idx]!;
+      file.timestamp = Date.now();
+    }
+  }
+
+  private remove(filePath: string) {
+    const idx = this.files.findIndex(f => f.path === filePath);
+    if (idx !== -1) {
+      this.files.splice(idx, 1)
+    }
+  }
+
+  private clearActive() {
+    this.files.forEach(f => f.isActive = false)
+  }
+
+  private async updateActiveFile(filePath: string, buf: number) {
+    if (this.client) {
+      const currentBuf = await this.client.buffer.id
+      if (currentBuf === buf) {
+        const getOption = await this.client.buffer.getOption
+        if ((await getOption('buftype')) != 'nofile') {
+          const idx = this.files.findIndex(f => f.path === filePath);
+          if (idx !== -1) {
+            this.clearActive()
+            const file = this.files[idx]!;
+            file.isActive = true;
+          } else {
+            logger.error("Could not find file in files" + filePath)
+          }
+        }
+      }
+    }
+  }
+
+
+  private async initFiles() {
     if (!this.client) {
       return;
     }
-    // const buffers = await this.client.buffers;
-    // const visibleFiles = [];
-    // for (const buf of buffers) {
-    //     const isListed = await buf.getOption('buflisted');
-    //     if (!isListed) continue;
-    //
-    //     const name = await buf.name;
-    //     if (name && !name.startsWith('term:')) {
-    //         try {
-    //             // check if file exists
-    //             await fs.access(name);
-    //             const lines = await buf.getLines();
-    //             visibleFiles.push({
-    //                 filePath: name,
-    //                 content: lines.join('\n'),
-    //             });
-    //         } catch (e) {
-    //             // file doesn't exist, probably a buffer without a file
-    //         }
-    //     }
-    // }
-    //this._state = { visibleFiles };
+    const buffers = await filterBuffer(async (buf) => {
+      const isListed = await buf.getOption('buflisted');
+      if (!isListed) return false;
+      const name = await buf.name;
+      if (name && !name.startsWith('term:')) {
+        try {
+          // check if file exists
+          await fs.access(name);
+          return true
+        } catch (e) {
+          // file doesn't exist, probably a buffer without a file
+          return false
+        }
+      }
+      return false
+    })
+    this.files = (await Promise.all(buffers.map(async (buf) => {
+      const name = await buf.name;
+      return {
+        path: name,
+        timestamp: Date.now(),
+        isActive: false,
+      }
+    })))
   }
 
   get state() {
-    return this._state;
+    logger.debug("Current Opened filess")
+    this.files.forEach(file => {
+      logger.debug(`${file.isActive ? '[Actived]' : ''} ${file.path}`)
+    })
+
+    return {
+      workspaceState: {
+        openFiles: [...this.files],
+      },
+    }
   }
 }
