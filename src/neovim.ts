@@ -2,6 +2,7 @@ import type { NeovimClient, Buffer } from 'neovim';
 import { fileURLToPath } from 'url';
 import logger from './log.js';
 import { attach } from 'neovim'
+import { isSameFile } from './fs.js';
 
 export interface NeovimSession {
   client: NeovimClient;
@@ -220,17 +221,30 @@ export async function diff(oldPath: string, newPath: string) {
     await Promise.all([
       findBuffer(async b => {
         const name = await b.name;
-        logger.debug(name);
-        return name === oldPath
-      }).then(b => b && nvim.command(`bdelete! ${b.id}`)),
-      findBuffer(async b => (await b.name) === newPath)
+        return isSameFile(name, oldPath)
+      })
+        .then(b => {
+          if (b) {
+            logger.debug("delete buffer " + oldPath)
+            nvim.command(`bdelete! ${b.id}`)
+          } else {
+            logger.debug("Cannot find buffer corresponding to " + oldPath)
+          }
+        })
+        .catch((e) => {
+          logger.err(e, "Failed to delete buffer : " + oldPath)
+        }),
+      findBuffer(async b => isSameFile(await b.name, newPath))
         .then(async b => {
           if (b) {
             await nvim.request("nvim_win_set_buf", [0, b.id]);
             await nvim.command("w")
             await nvim.command(`bdelete! ${b.id}`)
+          } else {
+            logger.debug("Cannot find buffer corresponding to " + oldPath)
           }
         })
+        .catch(logger.err)
     ])
     resolve(result);
   };
