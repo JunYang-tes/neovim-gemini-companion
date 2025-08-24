@@ -32,16 +32,16 @@ function sendIdeContextUpdateNotification(
 export class IDEServer {
   private server: HTTPServer | undefined;
   diffManager: DiffManager;
-  openFilesManager: OpenFilesManager;
+  //openFilesManager: OpenFilesManager;
   claudeIdeServer = new ClaudeIdeServer();
 
   constructor() {
     this.diffManager = new DiffManager();
-    this.openFilesManager = new OpenFilesManager();
+    //this.openFilesManager = new OpenFilesManager();
   }
 
   async start(port: number) {
-    await this.openFilesManager.initialize();
+    //await this.openFilesManager.initialize();
 
     const sessionsWithInitialNotification = new Set<string>();
     const transports: { [sessionId: string]: StreamableHTTPServerTransport } =
@@ -49,17 +49,17 @@ export class IDEServer {
 
     const app = express();
     app.use(express.json());
-    this.claudeIdeServer.start(app);
+    this.claudeIdeServer.start(app,port);
     const mcpServer = createMcpServer(this.diffManager);
 
-    this.openFilesManager.on('onDidChange', () => {
-      for (const transport of Object.values(transports)) {
-        sendIdeContextUpdateNotification(
-          transport,
-          this.openFilesManager,
-        );
-      }
-    });
+    // this.openFilesManager.on('onDidChange', () => {
+    //   for (const transport of Object.values(transports)) {
+    //     sendIdeContextUpdateNotification(
+    //       transport,
+    //       this.openFilesManager,
+    //     );
+    //   }
+    // });
 
     this.diffManager.on(
       'onDidChange',
@@ -164,10 +164,10 @@ export class IDEServer {
       }
 
       if (!sessionsWithInitialNotification.has(sessionId)) {
-        sendIdeContextUpdateNotification(
-          transport,
-          this.openFilesManager,
-        );
+        // sendIdeContextUpdateNotification(
+        //   transport,
+        //   this.openFilesManager,
+        // );
         sessionsWithInitialNotification.add(sessionId);
       }
     };

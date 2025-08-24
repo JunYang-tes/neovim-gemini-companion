@@ -24,6 +24,9 @@ import {
 } from './claude-schema.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { DiffManager } from './diff-manager.js';
+import { writeFile } from 'node:fs/promises'
+import * as os from 'node:os'
+import path from 'node:path';
 
 type JSONRPCHandler = (request: JSONRPCRequest) => Promise<any>;
 type NotificationHanlder = (notification: Notification) => Promise<any>
@@ -79,6 +82,16 @@ export class ClaudeIdeServer {
         ]
       }
     })
+    mcpServer.registerTool('closeAllDiffTabs', {}, async () => {
+      logger.debug('closeAllDiffTabs')
+      return {
+        content: [
+          {
+            type: "text", text: `CLOSED_${0}_DIFF_TABS`
+          }
+        ]
+      }
+    })
   }
 
   registerRequestHandler(method: string, handler: JSONRPCHandler) {
@@ -89,7 +102,8 @@ export class ClaudeIdeServer {
     this._notificationHandlers[schema.method] = async (value: any) => handler(schema.parse(value))
   }
 
-  async start(app: Express) {
+  async start(app: Express, port: number) {
+    await writeClaudeLock(port)
     app.get('/sse', (req, res) => {
       const transport = new SSEServerTransport('/claude', res);
       mcpServer.connect(transport)
@@ -115,3 +129,22 @@ export class ClaudeIdeServer {
   }
 }
 
+
+async function writeClaudeLock(port: number) {
+  await writeFile(
+    path.join(os.homedir(),
+      '.claude',
+      'ide',
+      `${port}.lock`
+    ),
+    JSON.stringify({
+      //pid: process.pid,
+      transport: 'sse',
+      ideName: 'Neovim',
+      workspaceFolders: [
+        process.cwd()
+      ],
+      authToken: ""
+    })
+  )
+}
