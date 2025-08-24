@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { DiffManager } from './diff-manager.js';
 import logger from './log.js';
 import { OpenFilesManager } from './open-files-manager.js';
+import { ClaudeIdeServer} from './claude.js'
 
 const MCP_SESSION_ID_HEADER = 'mcp-session-id';
 
@@ -32,6 +33,7 @@ export class IDEServer {
   private server: HTTPServer | undefined;
   diffManager: DiffManager;
   openFilesManager: OpenFilesManager;
+  claudeIdeServer = new ClaudeIdeServer();
 
   constructor() {
     this.diffManager = new DiffManager();
@@ -47,6 +49,7 @@ export class IDEServer {
 
     const app = express();
     app.use(express.json());
+    this.claudeIdeServer.start(app);
     const mcpServer = createMcpServer(this.diffManager);
 
     this.openFilesManager.on('onDidChange', () => {
