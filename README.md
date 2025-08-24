@@ -36,7 +36,9 @@ neovim-ide-companion --port=40005
 
 ```
 
-3. Run gemini in the terminal
+3. Run gemini/claude-code in the terminal
+
+**Gemini**
 
 Environment variables:
 - GEMINI_CLI_IDE_WORKSPACE_PATH: path to workspace directory
@@ -47,6 +49,15 @@ export GEMINI_CLI_IDE_WORKSPACE_PATH=$(pwd)
 export GEMINI_CLI_IDE_SERVER_PORT=40005
 export TERM_PROGRAM=vscode
 gemini
+```
+
+**Claude Code**
+
+Environment variables:
+- CLAUDE_CODE_SSE_PORT: port number (neovim-ide-companion's server port)
+```sh
+export CLAUDE_CODE_SSE_PORT=40005
+claude
 ```
 
 ## Diff Manager
