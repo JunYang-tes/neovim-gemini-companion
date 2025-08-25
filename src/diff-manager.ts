@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { promises as fs } from 'fs';
-import * as os from 'os';
+
 import * as path from 'path';
 import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import type { NeovimClient } from 'neovim';
@@ -19,18 +19,12 @@ export class DiffManager extends EventEmitter {
     }
 
     async showDiff(filePath: string, newContent: string) {
-        const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'neovim-ide-'));
-        const newFilePath = path.join(tempDir, 'new-' + path.basename(filePath));
-        const oldFilePath = path.join(tempDir, 'old-' + path.basename(filePath));
-        await Promise.all([
-            await fs.writeFile(oldFilePath, await fs.readFile(filePath)),
-            await fs.writeFile(newFilePath, newContent)
-        ])
+        const newFilePath = path.join(path.dirname(filePath), `✻ [New] ${path.basename(filePath)}`);
+        await fs.writeFile(newFilePath, newContent);
 
-        this.activeDiffs.set(filePath, { oldFilePath: oldFilePath, newFilePath: newFilePath });
+        this.activeDiffs.set(filePath, { oldFilePath: filePath, newFilePath: newFilePath });
 
-        return diff(oldFilePath, newFilePath).then(async (result) => {
-            const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
+        return diff(filePath, newFilePath).then(async (result) => {
             const tempContent = await fs.readFile(newFilePath, 'utf-8');
             this.emit('onDidChange', match(result)
                 .with('accepted', () => ({
@@ -61,15 +55,8 @@ export class DiffManager extends EventEmitter {
                     })
 
             }, 500)
-            Promise.all(
-                [
 
-                    fs.unlink(newFilePath),
-                    fs.unlink(oldFilePath)
-                ]
-            ).then(() =>
-                fs.rmdir(tempDir).catch(e => console.error(`Could not remove temp dir ${tempDir}`, e))
-            )
+            fs.unlink(newFilePath)
                 .catch(e => {
                     logger.err(e)
                 })
