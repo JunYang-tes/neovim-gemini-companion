@@ -29,7 +29,7 @@ export class DiffManager extends EventEmitter {
 
         this.activeDiffs.set(filePath, { oldFilePath: oldFilePath, newFilePath: newFilePath });
 
-        diff(oldFilePath, newFilePath).then(async (result) => {
+        return diff(oldFilePath, newFilePath).then(async (result) => {
             const originalContent = await fs.readFile(filePath, 'utf-8').catch(() => '');
             const tempContent = await fs.readFile(newFilePath, 'utf-8');
             this.emit('onDidChange', match(result)
@@ -61,11 +61,24 @@ export class DiffManager extends EventEmitter {
                     })
 
             }, 500)
+            Promise.all(
+                [
 
-            await fs.unlink(newFilePath);
-            await fs.unlink(oldFilePath);
-            await fs.rmdir(tempDir).catch(e => console.error(`Could not remove temp dir ${tempDir}`, e));
+                    fs.unlink(newFilePath),
+                    fs.unlink(oldFilePath)
+                ]
+            ).then(() =>
+                fs.rmdir(tempDir).catch(e => console.error(`Could not remove temp dir ${tempDir}`, e))
+            )
+                .catch(e => {
+                    logger.err(e)
+                })
+
             this.activeDiffs.delete(filePath);
+            return {
+                type: result,
+                content: tempContent
+            }
         });
     }
 

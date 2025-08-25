@@ -1,53 +1,21 @@
 ![Gemini in Neovim](images/gemini-in-neovim.png)
 
+This project is used to integrate gemini-cli/claude-code into Neovim. It provides an MCP service to enable gemini-cli/claude-code (which run in Neovim's terminal buffer) to interact with Neovim. This allows:
+
+[x] gemini-cli/claude-code to use Neovim as a diff manager
+[x] Passing open files as context to gemini-cli
+[ ] Passing diagnostic information to claude-code
+
+
 ## Getting started
 
-There are two ways to use this plugin. The first is to enable gemini and neovim-ide-companion directly. The second is to use [gemini-nvim](https://github.com/JunYang-tes/gemini-nvim).
-
-### Using gemini-nvim
-
-1. Install gemini-nvim
-2. Install neovim-ide-companion
+1. Install [agents-parter.nvim](https://github.com/JunYang-tes/agents-parter.nvim)
+2. Install neovim-ide-companion globally using npm/bun
 
 ```sh
 bun i -g neovim-ide-companion
 ```
 
-3. Start gemini in neovim using the Gemini command.
-
-### Direct usage
-
-Without installing gemini-nvim, you can use neovim-ide-companion directly, which is a bit more complicated.
-
-
-1. Get NVIM_LISTEN_ADDRESS
-
-In your neovim run:
-```
-:lua print(vim.v.servername)
-```
-
-The output will be similar to /run/user/1000/nvim.394501.0
-
-2. Run neovim-ide-companion in the terminal
-```sh
-export NVIM_LISTEN_ADDRESS=/run/user/1000/nvim.394501.0
-neovim-ide-companion --port=40005
-
-```
-
-3. Run gemini in the terminal
-
-Environment variables:
-- GEMINI_CLI_IDE_WORKSPACE_PATH: path to workspace directory
-- GEMINI_CLI_IDE_SERVER_PORT: port number (neovim-ide-companion's server port)
-- TERM_PROGRAM: must be set to "vscode" 
-```sh
-export GEMINI_CLI_IDE_WORKSPACE_PATH=$(pwd)
-export GEMINI_CLI_IDE_SERVER_PORT=40005
-export TERM_PROGRAM=vscode
-gemini
-```
 
 ## Diff Manager
 
@@ -56,3 +24,38 @@ When gemini needs to diff, neovim-ide-companion will open two files in your neov
 
 >`:help diff` for more information.
 
+
+## Development
+0. Complie typescript
+```sh
+npx tsc --watch
+```
+
+
+1. Start Neovim
+```sh
+cd ./scripts/
+./dev-1-start-neovim.sh
+```
+
+2. Start the server
+```
+cd ./scripts/
+./dev-2-start-server.sh
+
+```
+
+3. Start gemini/claude
+
+
+```sh
+cd ./scripts/
+./dev-3-start-gemini.sh
+```
+
+or
+
+```sh
+cd ./scripts/
+./dev-3-start-claude.sh
+```
