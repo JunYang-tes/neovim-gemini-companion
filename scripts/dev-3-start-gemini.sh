@@ -1,0 +1,4 @@
+export GEMINI_CLI_IDE_WORKSPACE_PATH=$(pwd)
+export GEMINI_CLI_IDE_SERVER_PORT=40005
+export TERM_PROGRAM=vscode
+gemini

@@ -1,0 +1,1 @@
+nvim --listen ./a.lock
