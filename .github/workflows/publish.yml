@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - main
-    if: "startsWith(github.event.head_commit.message, 'release')"
 
 jobs:
   build:
+    if: "startsWith(github.event.head_commit.message, 'release')"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +24,7 @@ jobs:
           path: dist
 
   publish-npm:
+    if: "startsWith(github.event.head_commit.message, 'release')"
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -36,6 +37,6 @@ jobs:
         with:
           node-version: 18
           registry-url: https://registry.npmjs.org/
-      - run: npm publish
+      - run: npm publish --dry-run
         env:
           NODE_AUTH_TOKEN: ${{secrets.NPM_TOKEN}}
