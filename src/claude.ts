@@ -27,6 +27,8 @@ import { DiffManager } from './diff-manager.js';
 import { writeFile } from 'node:fs/promises'
 import * as os from 'node:os'
 import path from 'node:path';
+import { getDiagnostics } from './neovim.js';
+import { fileURLToPath } from 'node:url';
 
 type JSONRPCHandler = (request: JSONRPCRequest) => Promise<any>;
 type NotificationHanlder = (notification: Notification) => Promise<any>
@@ -90,6 +92,34 @@ export class ClaudeIdeServer {
             type: "text", text: `CLOSED_${0}_DIFF_TABS`
           }
         ]
+      }
+    })
+    mcpServer.registerTool('getDiagnostics', {
+      inputSchema: z.object({
+        uri: z.string()
+          .optional()
+          .describe(`Optional file URI to get diagnostics for. If not provided, gets diagnostics for all files.`)
+      }).shape
+    }, async ({ uri }) => {
+      logger.debug("getDiagnostics for " + uri)
+      if (uri) {
+        return {
+          content: [
+            {
+              type: 'text', text:
+                JSON.stringify(
+                  await getDiagnostics(fileURLToPath(uri))
+                )
+            }
+          ]
+        }
+      } else {
+        return {
+          content: [{
+            type: 'text',
+            text: "[]"
+          }]
+        }
       }
     })
   }
