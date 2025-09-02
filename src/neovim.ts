@@ -1,5 +1,5 @@
 import type { NeovimClient, Buffer } from 'neovim';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import logger from './log.js';
 import { attach } from 'neovim'
 import { isSameFile } from './fs.js';
@@ -340,3 +340,151 @@ export async function tempEdit(content: string) {
   })
 }
 
+/**
+ * Diagnostic severity levels
+ */
+export const enum DiagnosticSeverity {
+  /**
+   * Reports an error.
+   */
+  Error = 1,
+  /**
+   * Reports a warning.
+   */
+  Warning = 2,
+  /**
+   * Reports an information.
+   */
+  Information = 3,
+  /**
+   * Reports a hint.
+   */
+  Hint = 4
+}
+
+/**
+ * Represents a position in a text document.
+ */
+export interface Position {
+  /**
+   * Line position in a document (zero-based).
+   */
+  line: number;
+
+  /**
+   * Character offset on a line in a document (zero-based).
+   */
+  character: number;
+}
+
+/**
+ * A range in a text document expressed as (zero-based) start and end positions.
+ */
+export interface Range {
+  /**
+   * The range's start position.
+   */
+  start: Position;
+
+  /**
+   * The range's end position.
+   */
+  end: Position;
+}
+
+/**
+ * Represents a diagnostic, such as a compiler error or warning.
+ */
+export interface Diagnostic {
+  /**
+   * The range at which the message applies.
+   */
+  range: Range;
+
+  /**
+   * The diagnostic's severity.
+   */
+  severity: DiagnosticSeverity;
+
+  /**
+   * The diagnostic's message.
+   */
+  message: string;
+
+  /**
+   * The diagnostic's source.
+   */
+  source?: string;
+
+  /**
+   * The diagnostic's code.
+   */
+  code?: string | number;
+}
+
+async function getDiagnosticsBuf(bufnr: number): Promise<Diagnostic[]> {
+
+  // Execute Lua code to get diagnostics from Neovim
+  try {
+    // @ts-ignore
+    const diagnostics: any[] = await nvim.lua(`
+			local bufnr = ...
+			if bufnr == nil or bufnr == 0 then
+				bufnr = vim.api.nvim_get_current_buf()
+			end
+			return vim.diagnostic.get(bufnr)
+		`, [bufnr]);
+
+    // Convert Neovim diagnostics to our Diagnostic format
+    return diagnostics.map(d => ({
+      range: {
+        start: { line: d.lnum, character: d.col },
+        end: { line: d.end_lnum !== undefined ? d.end_lnum : d.lnum, character: d.end_col !== undefined ? d.end_col : d.col }
+      },
+      severity: d.severity,
+      message: d.message,
+      source: d.source,
+      code: d.code?.toString()
+    }));
+  } catch (error) {
+    logger.err(error);
+    return [];
+  }
+}
+
+export async function getDiagnostics(filepath?: string): Promise<Array<{
+  uri: string;
+  diagnostics: Diagnostic[];
+}>> {
+  // If filepath is undefined, get all diagnostics from all buffers
+  if (filepath === undefined) {
+    const bufs = await nvim.buffers;
+    return Promise.all(bufs.map(async buf => {
+      const name = await buf.name;
+      const diagnostics = await getDiagnosticsBuf(buf.id)
+      return {
+        uri: pathToFileURL(name).toString(),
+        diagnostics
+      }
+    }))
+      .then(diagnostics => diagnostics.filter(d => d.diagnostics.length > 0));
+  }
+
+  // Get the buffer for the specified filepath
+  const buf = await findBuffer(async (b) => {
+    const name = await b.name;
+    return name === filepath;
+  });
+
+  if (!buf) {
+    return [];
+  }
+  const diagnostics = await getDiagnosticsBuf(buf.id)
+  if (diagnostics.length > 0) {
+    return [{
+      uri: pathToFileURL(filepath).toString(),
+      diagnostics
+    }]
+  }
+  return []
+}

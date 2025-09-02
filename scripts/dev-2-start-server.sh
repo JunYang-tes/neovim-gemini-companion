@@ -1,2 +1,2 @@
-export NVIM_LISTEN_ADDRESS=./a.lock
-node ../dist/main.js --port=40005
+export NVIM_LISTEN_ADDRESS=./a.sock
+node --inspect ../dist/main.js --port=40005
