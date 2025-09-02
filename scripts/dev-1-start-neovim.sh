@@ -1,1 +1,1 @@
-nvim --listen ./a.lock
+nvim --listen ./a.sock

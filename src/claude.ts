@@ -102,24 +102,22 @@ export class ClaudeIdeServer {
       }).shape
     }, async ({ uri }) => {
       logger.debug("getDiagnostics for " + uri)
-      if (uri) {
-        return {
-          content: [
-            {
-              type: 'text', text:
-                JSON.stringify(
-                  await getDiagnostics(fileURLToPath(uri))
-                )
-            }
-          ]
-        }
-      } else {
-        return {
-          content: [{
-            type: 'text',
-            text: "[]"
-          }]
-        }
+      const diagnostics =
+        await getDiagnostics(
+          uri ?
+            fileURLToPath(uri)
+            : undefined
+        )
+      logger.debug(JSON.stringify(diagnostics, null, 2))
+      return {
+        content: [
+          {
+            type: 'text', text:
+              JSON.stringify(
+                diagnostics
+              )
+          }
+        ]
       }
     })
   }

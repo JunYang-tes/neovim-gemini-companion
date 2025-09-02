@@ -1,5 +1,5 @@
 import type { NeovimClient, Buffer } from 'neovim';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import logger from './log.js';
 import { attach } from 'neovim'
 import { isSameFile } from './fs.js';
@@ -422,49 +422,7 @@ export interface Diagnostic {
   code?: string | number;
 }
 
-export async function getDiagnostics(filepath?: string): Promise<Diagnostic[]> {
-  // If filepath is undefined, get all diagnostics from all buffers
-  if (filepath === undefined) {
-    try {
-      // Execute Lua code to get diagnostics from all buffers
-      const allDiagnostics: any[] = await nvim.lua(`
-        local all_diagnostics = {}
-        local buffers = vim.api.nvim_list_bufs()
-        for _, bufnr in ipairs(buffers) do
-          local buf_diagnostics = vim.diagnostic.get(bufnr)
-          for _, diagnostic in ipairs(buf_diagnostics) do
-            table.insert(all_diagnostics, diagnostic)
-          end
-        end
-        return all_diagnostics
-      `, []);
-      
-      // Convert Neovim diagnostics to our Diagnostic format
-      return allDiagnostics.map(d => ({
-        range: {
-          start: { line: d.lnum, character: d.col },
-          end: { line: d.end_lnum !== undefined ? d.end_lnum : d.lnum, character: d.end_col !== undefined ? d.end_col : d.col }
-        },
-        severity: d.severity,
-        message: d.message,
-        source: d.source,
-        code: d.code?.toString()
-      }));
-    } catch (error) {
-      logger.err(error, 'Failed to get all diagnostics');
-      return [];
-    }
-  }
-  
-  // Get the buffer for the specified filepath
-  const buf = await findBuffer(async (b) => {
-    const name = await b.name;
-    return name === filepath;
-  });
-
-  if (!buf) {
-    return [];
-  }
+async function getDiagnosticsBuf(bufnr: number): Promise<Diagnostic[]> {
 
   // Execute Lua code to get diagnostics from Neovim
   try {
@@ -475,7 +433,7 @@ export async function getDiagnostics(filepath?: string): Promise<Diagnostic[]> {
 				bufnr = vim.api.nvim_get_current_buf()
 			end
 			return vim.diagnostic.get(bufnr)
-		`, [buf.id]);
+		`, [bufnr]);
 
     // Convert Neovim diagnostics to our Diagnostic format
     return diagnostics.map(d => ({
@@ -489,7 +447,44 @@ export async function getDiagnostics(filepath?: string): Promise<Diagnostic[]> {
       code: d.code?.toString()
     }));
   } catch (error) {
-    logger.err(error, 'Failed to get diagnostics for ' + filepath);
+    logger.err(error);
     return [];
   }
+}
+
+export async function getDiagnostics(filepath?: string): Promise<Array<{
+  uri: string;
+  diagnostics: Diagnostic[];
+}>> {
+  // If filepath is undefined, get all diagnostics from all buffers
+  if (filepath === undefined) {
+    const bufs = await nvim.buffers;
+    return Promise.all(bufs.map(async buf => {
+      const name = await buf.name;
+      const diagnostics = await getDiagnosticsBuf(buf.id)
+      return {
+        uri: pathToFileURL(name).toString(),
+        diagnostics
+      }
+    }))
+      .then(diagnostics => diagnostics.filter(d => d.diagnostics.length > 0));
+  }
+
+  // Get the buffer for the specified filepath
+  const buf = await findBuffer(async (b) => {
+    const name = await b.name;
+    return name === filepath;
+  });
+
+  if (!buf) {
+    return [];
+  }
+  const diagnostics = await getDiagnosticsBuf(buf.id)
+  if (diagnostics.length > 0) {
+    return [{
+      uri: pathToFileURL(filepath).toString(),
+      diagnostics
+    }]
+  }
+  return []
 }
