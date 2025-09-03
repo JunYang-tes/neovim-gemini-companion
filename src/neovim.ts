@@ -1,4 +1,4 @@
-import type { NeovimClient, Buffer } from 'neovim';
+import type { NeovimClient, Buffer, Window } from 'neovim';
 import { fileURLToPath, pathToFileURL } from 'url';
 import logger from './log.js';
 import { attach } from 'neovim'
@@ -37,6 +37,21 @@ export async function onNotification(cb: (m: string, args: any[]) => boolean) {
 }
 
 
+export async function findWindow(
+  predict: (win: Window) => Promise<boolean> | boolean,
+) {
+  const tabs = await nvim.tabpages;
+  for (const tab of tabs) {
+    const windows = await tab.windows;
+    for (const win of windows) {
+      if (await predict(win)) {
+        return win;
+      }
+    }
+  }
+  return null;
+}
+
 export async function findBuffer(
   predict: (b: Buffer) => Promise<boolean> | boolean,
 ) {
@@ -47,6 +62,11 @@ export async function findBuffer(
     }
   }
   return null;
+}
+
+export async function mapBuffer<U>(f: (b: Buffer) => Promise<U>) {
+  const buffers = await nvim.buffers;
+  return (await Promise.all(buffers.map(f)))
 }
 
 export async function filterBuffer(
@@ -487,4 +507,29 @@ export async function getDiagnostics(filepath?: string): Promise<Array<{
     }]
   }
   return []
+}
+
+export async function activeLastTermBuffer() {
+  const buf = (await mapBuffer(async b => {
+    const ts = Number(await b.getVar("neovim-ide-companion-ts")) || 0
+    return [ts, b.id] as const
+  }))
+    .reduce((acc, [ts, id]) => {
+      if (ts > acc.ts) {
+        return { ts, id }
+      }
+      return acc
+    }, { ts: 0, id: 0 })
+  if (buf.id !== 0 && buf.ts !== 0) {
+    const win = await findWindow(async w => {
+      return (await w.buffer.id) === buf.id
+    })
+    if (win) {
+      // Activate this window
+      await nvim.request("nvim_set_current_win", [win.id]);
+    } else {
+      // If no window contains this buffer, create a new split with this buffer
+      await nvim.command(`sbuffer ${buf.id}`);
+    }
+  }
 }

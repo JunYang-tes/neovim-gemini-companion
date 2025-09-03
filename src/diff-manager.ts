@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import type { JSONRPCNotification } from '@modelcontextprotocol/sdk/types.js';
 import type { NeovimClient } from 'neovim';
-import { diff, findBuffer, nvim } from './neovim.js';
+import { activeLastTermBuffer, diff, findBuffer, nvim } from './neovim.js';
 import { match } from 'ts-pattern'
 import logger from './log.js';
 
@@ -55,6 +55,7 @@ export class DiffManager extends EventEmitter {
                     })
 
             }, 500)
+            activeLastTermBuffer();
 
             fs.unlink(newFilePath)
                 .catch(e => {
