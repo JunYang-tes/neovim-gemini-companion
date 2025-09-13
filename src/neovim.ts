@@ -1,8 +1,10 @@
 import type { NeovimClient, Buffer, Window } from 'neovim';
 import { fileURLToPath, pathToFileURL } from 'url';
 import logger from './log.js';
-import { attach } from 'neovim'
+import { attach, findNvim } from 'neovim'
 import { isSameFile } from './fs.js';
+import { spawn } from 'child_process';
+import { log } from 'winston';
 
 export interface NeovimSession {
   client: NeovimClient;
@@ -11,16 +13,24 @@ export interface NeovimSession {
 
 if (!process.env['NVIM_LISTEN_ADDRESS']) {
   logger.error('environment variable NVIM_LISTEN_ADDRESS is not set');
-  process.exit(1);
+  if (!process.env.VITEST) {
+    process.exit(1);
+  }
 }
 
 
-export const nvim: NeovimClient = attach({
-  socket: process.env['NVIM_LISTEN_ADDRESS'],
-  options: {
-    logger: logger
-  }
-})
+export const nvim: NeovimClient = process.env.VITEST
+  ? (() => {
+    const found = findNvim({ orderBy: 'desc', minVersion: '0.9.0' })
+    const nvim_proc = spawn(found.matches[0].path, ['--clean', '--embed', '-u', "NORC"], {});
+    return attach({ proc: nvim_proc });
+  })()
+  : attach({
+    socket: process.env['NVIM_LISTEN_ADDRESS'],
+    options: {
+      logger: logger
+    }
+  })
 nvim.on('disconnect', () => {
   logger.error('Neovim disconnected');
   process.exit(1);
@@ -360,6 +370,15 @@ export async function tempEdit(content: string) {
   })
 }
 
+export async function openFile(path: string) {
+  const buf = await findBuffer(async b => isSameFile(await b.name, path))
+  if (buf) {
+    return buf
+  }
+
+
+}
+
 /**
  * Diagnostic severity levels
  */
@@ -507,6 +526,20 @@ export async function getDiagnostics(filepath?: string): Promise<Array<{
     }]
   }
   return []
+}
+export async function isCurrentBufNeovimIdeCompanion() {
+  // check if there is a var on current call called neovim-ide-companion-ts or is-neovim-ide-companion
+  const buf = await nvim.buffer;
+  return isNeovimIdeCompanionBuffer(buf);
+}
+
+export async function isNeovimIdeCompanionBuffer(buf: Buffer) {
+  const ts = await buf.getVar("neovim-ide-companion-ts");
+  if (ts) {
+    return true;
+  }
+  const isCompanion = await buf.getVar("is-neovim-ide-companion");
+  return Boolean(isCompanion);
 }
 
 export async function activeLastTermBuffer() {
