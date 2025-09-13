@@ -90,6 +90,10 @@ export async function findBuffer(
   return null;
 }
 
+export async function findFileBuffer(file: string) {
+  return findBuffer(async b => isSameFile(await b.name, file))
+}
+
 export async function mapBuffer<U>(f: (b: Buffer) => Promise<U>) {
   const buffers = await nvim.buffers;
   return (await Promise.all(buffers.map(f)))

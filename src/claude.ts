@@ -27,7 +27,7 @@ import { DiffManager } from './diff-manager.js';
 import { writeFile } from 'node:fs/promises'
 import * as os from 'node:os'
 import path from 'node:path';
-import { activeBuffer, getDiagnostics, openFile } from './neovim.js';
+import { activeBuffer, findFileBuffer, getDiagnostics, openFile } from './neovim.js';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type JSONRPCHandler = (request: JSONRPCRequest) => Promise<any>;
@@ -189,6 +189,43 @@ export class ClaudeIdeServer {
 
         return {
           content: []
+        }
+      }
+    )
+    mcpServer.registerTool(
+      'checkDocumentDirty',
+      {
+        inputSchema: z.object({
+          filePath: z.string().describe("Path to the file to check")
+        })
+          .shape
+      },
+      async ({ filePath }) => {
+        const buf = await findFileBuffer(filePath)
+        if (buf == null) {
+          return {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  success: false, message: `Document not open: ${filePath}`
+                })
+              }
+            ]
+          }
+        }
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                filePath: filePath,
+                isDirty: await buf.getOption('modified'),
+                isUntitled: false,
+              })
+            }
+          ]
         }
       }
     )
