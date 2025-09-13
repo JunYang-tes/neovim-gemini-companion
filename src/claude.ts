@@ -27,8 +27,8 @@ import { DiffManager } from './diff-manager.js';
 import { writeFile } from 'node:fs/promises'
 import * as os from 'node:os'
 import path from 'node:path';
-import { getDiagnostics } from './neovim.js';
-import { fileURLToPath } from 'node:url';
+import { activeBuffer, getDiagnostics, openFile } from './neovim.js';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 type JSONRPCHandler = (request: JSONRPCRequest) => Promise<any>;
 type NotificationHanlder = (notification: Notification) => Promise<any>
@@ -120,6 +120,78 @@ export class ClaudeIdeServer {
         ]
       }
     })
+    mcpServer.registerTool(
+      'openFile',
+      {
+        inputSchema: z.object({
+          filePath: z.string().describe("Path to the file to open"),
+          preview: z
+            .boolean()
+            .describe("Whether to open the file in preview mode")
+            .default(false),
+          startText: z
+            .string()
+            .describe(
+              "Text pattern to find the start of the selection range. Selects from the beginning of this match.",
+            ),
+          endText: z
+            .string()
+            .describe(
+              "Text pattern to find the end of the selection range. Selects up to the end of this match. If not provided, only the startText match will be selected.",
+            ),
+          selectToEndOfLine: z
+            .boolean()
+            .describe(
+              "If true, selection will extend to the end of the line containing the endText match.",
+            )
+            .default(!1),
+          makeFrontmost: z
+            .boolean()
+            .describe(
+              "Whether to make the file the active editor tab. If false, the file will be opened in the background without changing focus.",
+            )
+            .default(!0),
+        })
+          .shape
+      },
+      async (args) => {
+        if (args.preview) {
+          logger.debug("open file in preview mode is not supported")
+        }
+        const buffer = await openFile(args.filePath);
+        if (buffer) {
+          if (args.makeFrontmost) {
+            await activeBuffer(buffer)
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Opened file: ${args.filePath}`
+                }
+              ]
+            }
+          } else {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: JSON.stringify({
+                    success: !0,
+                    filePath: args.filePath,
+                    fileUrl: pathToFileURL(args.filePath),
+                    message: `Opened file: ${args.filePath}`,
+                  })
+                }
+              ]
+            }
+          }
+        }
+
+        return {
+          content: []
+        }
+      }
+    )
   }
 
   registerRequestHandler(method: string, handler: JSONRPCHandler) {

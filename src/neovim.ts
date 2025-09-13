@@ -3,8 +3,9 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import logger from './log.js';
 import { attach, findNvim } from 'neovim'
 import { isSameFile } from './fs.js';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import { log } from 'winston';
+import { never } from 'zod/v4-mini';
 
 export interface NeovimSession {
   client: NeovimClient;
@@ -19,23 +20,38 @@ if (!process.env['NVIM_LISTEN_ADDRESS']) {
 }
 
 
+let neovimProcess: ChildProcessWithoutNullStreams | null = null
 export const nvim: NeovimClient = process.env.VITEST
   ? (() => {
     const found = findNvim({ orderBy: 'desc', minVersion: '0.9.0' })
-    const nvim_proc = spawn(found.matches[0].path, ['--clean', '--embed', '-u', "NORC"], {});
-    return attach({ proc: nvim_proc });
+    neovimProcess = spawn(found.matches[0].path, ['--clean', '--embed', '-u', "NORC"], {});
+    return attach({ proc: neovimProcess });
   })()
-  : attach({
-    socket: process.env['NVIM_LISTEN_ADDRESS'],
-    options: {
-      logger: logger
-    }
-  })
-nvim.on('disconnect', () => {
-  logger.error('Neovim disconnected');
-  process.exit(1);
-})
+  : (() => {
+    const nvim = attach({
+      socket: process.env['NVIM_LISTEN_ADDRESS'],
+      options: {
+        logger: logger
+      }
+    })
+    nvim.on('disconnect', () => {
+      logger.error('Neovim disconnected');
+      process.exit(1);
+    })
+    return nvim
+  })();
 
+export function connectNewNeovim() {
+  if (neovimProcess) {
+    neovimProcess.kill()
+  }
+  const found = findNvim({ orderBy: 'desc', minVersion: '0.9.0' })
+  neovimProcess = spawn(found.matches[0].path, ['--clean', '--embed', '-u', "NORC"], {});
+  nvim.attach({
+    reader: neovimProcess.stdout,
+    writer: neovimProcess.stdin
+  })
+}
 
 export async function onNotification(cb: (m: string, args: any[]) => boolean) {
   const notificationHandler = (m: string, args: any[]) => {
@@ -375,8 +391,50 @@ export async function openFile(path: string) {
   if (buf) {
     return buf
   }
+  if (await isCurrentBufNeovimIdeCompanion()) {
+    await nvim.lua(`local file = ...
+  local file = ...
+  local path = vim.fn.fnameescape(file)
 
+  local group = vim.api.nvim_create_augroup("EditAnywayOnce", { clear = true })
 
+  vim.api.nvim_create_autocmd("SwapExists", {
+    group = group,
+    pattern = "*",
+    callback = function()
+      vim.v.swapchoice = "e"
+    end,
+  })
+
+  pcall(function()
+    vim.cmd("split " .. path)
+  end)
+
+  vim.api.nvim_del_augroup_by_name("EditAnywayOnce")
+    `, [path])
+  } else {
+    await nvim.lua(`
+  local file = ...
+  local path = vim.fn.fnameescape(file)
+
+  local group = vim.api.nvim_create_augroup("EditAnywayOnce", { clear = true })
+
+  vim.api.nvim_create_autocmd("SwapExists", {
+    group = group,
+    pattern = "*",
+    callback = function()
+      vim.v.swapchoice = "e"
+    end,
+  })
+
+  pcall(function()
+    vim.cmd("edit " .. path)
+  end)
+
+  vim.api.nvim_del_augroup_by_name("EditAnywayOnce")
+    `, [path])
+  }
+  return await findBuffer(async b => isSameFile(await b.name, path))
 }
 
 /**
@@ -564,5 +622,18 @@ export async function activeLastTermBuffer() {
       // If no window contains this buffer, create a new split with this buffer
       await nvim.command(`sbuffer ${buf.id}`);
     }
+  }
+}
+
+export async function activeBuffer(buf: Buffer) {
+  const win = await findWindow(async w => {
+    return (await w.buffer.id) === buf.id
+  })
+  if (win) {
+    // Activate this window
+    await nvim.request("nvim_set_current_win", [win.id]);
+  } else {
+    // If no window contains this buffer, create a new split with this buffer
+    await nvim.command(`sbuffer ${buf.id}`);
   }
 }
